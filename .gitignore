@@ -1,0 +1,17 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+**/build/
+**/*.egg-info/
+.pytest_cache/
+frontend/node_modules/
+frontend/dist/
+frontend/.angular/
+frontend/.ux-check/
+frontend/public/viewer-sdk/host.js
+*.log
+.run/
+deploy/.env.runtime
+deploy/.env.build
+deploy/secrets/

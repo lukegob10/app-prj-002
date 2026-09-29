@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><head><base href="/"><meta charset="utf-8"><title>Agora</title><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#0a1424"><link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png"><link rel="icon" type="image/png" sizes="192x192" href="/brand/favicon-192.png"><link rel="apple-touch-icon" sizes="180x180" href="/brand/apple-touch-icon.png"><script>
+  (() => {
+    // Local sessions and origin validation use the documented localhost address.
+    if (location.protocol === 'http:' && ['127.0.0.1', '[::1]'].includes(location.hostname)) {
+      const canonical = new URL(location.href);
+      canonical.hostname = 'localhost';
+      location.replace(canonical.href);
+      return;
+    }
+    let saved;
+    try { saved = localStorage.getItem('agora-theme'); } catch {}
+    const theme = saved === 'light' || saved === 'dark' ? saved : matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.dataset.theme = theme;
+    document.querySelector('meta[name="theme-color"]').content = theme === 'dark' ? '#0a1424' : '#f3f6fa';
+  })();
+</script><script src="/viewer-sdk/host.js" defer></script></head><body><agora-root></agora-root></body></html>

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agora-platform"
+version = "0.1.0"
+description = "Governed HTML project hosting"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.30,<1",
+    "oracledb>=2,<5",
+    "trino>=0.333,<1",
+    "python-multipart>=0.0.18,<1",
+    "python-dotenv>=1,<2",
+    "cryptography>=42,<51",
+    "tzdata>=2024.1,<2027",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.data-files]
+"share/agora" = ["schema.sql"]
+"share/agora/migrations" = ["migrations/001_api_datasets.sql", "migrations/002_api_dataset_schedules.sql"]

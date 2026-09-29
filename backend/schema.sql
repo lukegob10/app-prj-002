@@ -1,0 +1,484 @@
+-- Canonical one-time baseline for a new Agora Oracle schema.
+-- Requires Oracle 12.2+ with COMPATIBLE >= 12.2 for the requested table names.
+-- Use AL32UTF8 for full support of the Unicode text accepted by the application.
+-- Run while connected as the Oracle user that should own the Agora tables.
+
+CREATE TABLE TB_TA_AGORA_USERS (
+    id              VARCHAR2(36 BYTE)   NOT NULL,
+    username        VARCHAR2(64 BYTE)   NOT NULL,
+    username_norm   VARCHAR2(64 BYTE)   NOT NULL,
+    full_name       VARCHAR2(200 BYTE)  NOT NULL,
+    password_hash   VARCHAR2(512 BYTE)  NOT NULL,
+    is_admin        NUMBER(1) DEFAULT 0 NOT NULL,
+    created_at      TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+    updated_at      TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+    CONSTRAINT PK_TA_USERS PRIMARY KEY (id),
+    CONSTRAINT UQ_TA_USERS_USERNAME_NORM UNIQUE (username_norm),
+    CONSTRAINT CK_TA_USERS_ADMIN CHECK (is_admin IN (0, 1))
+)
+/
+COMMENT ON TABLE TB_TA_AGORA_USERS IS 'Platform users; password_hash contains a password verifier, never a plaintext password.'
+/
+
+CREATE TABLE TB_TA_AGORA_SESSIONS (
+    token_hash  VARCHAR2(64 BYTE) NOT NULL,
+    account_id  VARCHAR2(36 BYTE) NOT NULL,
+    csrf_token  VARCHAR2(64 BYTE) NOT NULL,
+    created_at  TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+    expires_at  TIMESTAMP WITH TIME ZONE NOT NULL,
+    CONSTRAINT PK_TA_SESSIONS PRIMARY KEY (token_hash),
+    CONSTRAINT FK_TA_SESS_USER FOREIGN KEY (account_id)
+        REFERENCES TB_TA_AGORA_USERS (id) ON DELETE CASCADE,
+    CONSTRAINT CK_TA_SESS_LIFETIME CHECK (expires_at > created_at)
+)
+/
+CREATE INDEX IX_TA_SESS_USER ON TB_TA_AGORA_SESSIONS (account_id)
+/
+CREATE INDEX IX_TA_SESS_EXPIRES ON TB_TA_AGORA_SESSIONS (expires_at)
+/
+COMMENT ON TABLE TB_TA_AGORA_SESSIONS IS 'Hash-only browser sessions with expiry and CSRF state.'
+/
+
+CREATE TABLE TB_TA_AGORA_LOGIN_ATTEMPTS (
+    account_id       VARCHAR2(36 BYTE) NOT NULL,
+    failed_attempts  NUMBER(4) DEFAULT 0 NOT NULL,
+    window_started_at TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+    locked_until     TIMESTAMP WITH TIME ZONE,
+    updated_at       TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+    CONSTRAINT PK_TA_LOGIN_ATTEMPTS PRIMARY KEY (account_id),
+    CONSTRAINT FK_TA_LOGIN_USER FOREIGN KEY (account_id)
+        REFERENCES TB_TA_AGORA_USERS (id) ON DELETE CASCADE,
+    CONSTRAINT CK_TA_LOGIN_COUNT CHECK (failed_attempts BETWEEN 0 AND 5)
+)
+/
+COMMENT ON TABLE TB_TA_AGORA_LOGIN_ATTEMPTS IS 'Per-user failed-login window and temporary lock state.'
+/
+
+CREATE TABLE TB_TA_AGORA_PROJECTS (
+    id                   VARCHAR2(36 BYTE) NOT NULL,
+    name                 VARCHAR2(160 CHAR) NOT NULL,
+    description          VARCHAR2(1000 CHAR),
+    owner_id             VARCHAR2(36 BYTE) NOT NULL,
+    allow_viewer_writes  NUMBER(1) DEFAULT 0 NOT NULL,
+    published_version_id VARCHAR2(36 BYTE),
+    created_at           TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+    updated_at           TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+    CONSTRAINT PK_TA_PROJECTS PRIMARY KEY (id),
+    CONSTRAINT FK_TA_PROJECT_OWNER FOREIGN KEY (owner_id)
+        REFERENCES TB_TA_AGORA_USERS (id),
+    CONSTRAINT CK_TA_PROJECT_WRITES CHECK (allow_viewer_writes IN (0, 1))
+)
+/
+CREATE INDEX IX_TA_PROJECT_OWNER ON TB_TA_AGORA_PROJECTS (owner_id)
+/
+COMMENT ON TABLE TB_TA_AGORA_PROJECTS IS 'Top-level Agora workspaces and their current published content pointer.'
+/
+
+CREATE TABLE TB_TA_AGORA_MEMBERSHIPS (
+    project_id  VARCHAR2(36 BYTE) NOT NULL,
+    account_id  VARCHAR2(36 BYTE) NOT NULL,
+    role        VARCHAR2(10 BYTE) NOT NULL,
+    created_at  TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+    CONSTRAINT PK_TA_MEMBERSHIPS PRIMARY KEY (project_id, account_id),
+    CONSTRAINT FK_TA_MEM_PROJECT FOREIGN KEY (project_id)
+        REFERENCES TB_TA_AGORA_PROJECTS (id) ON DELETE CASCADE,
+    CONSTRAINT FK_TA_MEM_USER FOREIGN KEY (account_id)
+        REFERENCES TB_TA_AGORA_USERS (id) ON DELETE CASCADE,
+    CONSTRAINT CK_TA_MEM_ROLE CHECK (role IN ('owner', 'editor', 'viewer'))
+)
+/
+CREATE INDEX IX_TA_MEM_USER ON TB_TA_AGORA_MEMBERSHIPS (account_id)
+/
+COMMENT ON TABLE TB_TA_AGORA_MEMBERSHIPS IS 'Project membership and the member role used by authorization.'
+/
+
+CREATE TABLE TB_TA_AGORA_AUDIT (
+    id          VARCHAR2(36 BYTE) NOT NULL,
+    actor_id    VARCHAR2(36 BYTE),
+    action      VARCHAR2(100 BYTE) NOT NULL,
+    project_id  VARCHAR2(36 BYTE),
+    subject_id  VARCHAR2(36 BYTE),
+    details     CLOB,
+    created_at  TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+    CONSTRAINT PK_TA_AUDIT PRIMARY KEY (id),
+    CONSTRAINT FK_TA_AUDIT_ACTOR FOREIGN KEY (actor_id)
+        REFERENCES TB_TA_AGORA_USERS (id),
+    CONSTRAINT CK_TA_AUDIT_DETAILS_JSON CHECK (details IS JSON)
+)
+/
+CREATE INDEX IX_TA_AUDIT_PROJECT_TIME ON TB_TA_AGORA_AUDIT (project_id, created_at)
+/
+CREATE INDEX IX_TA_AUDIT_ACTOR_TIME ON TB_TA_AGORA_AUDIT (actor_id, created_at)
+/
+COMMENT ON TABLE TB_TA_AGORA_AUDIT IS 'Append-only application and administrative audit events.'
+/
+
+CREATE TABLE TB_TA_AGORA_CONTENT_PACKAGES (
+    id            VARCHAR2(36 BYTE) NOT NULL,
+    project_id    VARCHAR2(36 BYTE) NOT NULL,
+    entry_path    VARCHAR2(512 BYTE) NOT NULL,
+    package_sha256 VARCHAR2(64 BYTE) NOT NULL,
+    created_by    VARCHAR2(36 BYTE) NOT NULL,
+    created_at    TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+    CONSTRAINT PK_TA_CONTENT_PACKAGES PRIMARY KEY (id),
+    CONSTRAINT UQ_TA_PACKAGE_PROJECT_ID UNIQUE (project_id, id),
+    CONSTRAINT FK_TA_PACKAGE_PROJECT FOREIGN KEY (project_id)
+        REFERENCES TB_TA_AGORA_PROJECTS (id) ON DELETE CASCADE,
+    CONSTRAINT FK_TA_PACKAGE_CREATOR FOREIGN KEY (created_by)
+        REFERENCES TB_TA_AGORA_USERS (id)
+)
+/
+CREATE INDEX IX_TA_PACKAGE_PROJECT_TIME ON TB_TA_AGORA_CONTENT_PACKAGES (project_id, created_at)
+/
+COMMENT ON TABLE TB_TA_AGORA_CONTENT_PACKAGES IS 'Immutable HTML asset packages uploaded to one project.'
+/
+
+CREATE TABLE TB_TA_AGORA_CONTENT_ASSETS (
+    package_id  VARCHAR2(36 BYTE) NOT NULL,
+    path        VARCHAR2(512 BYTE) NOT NULL,
+    mime_type   VARCHAR2(160 BYTE) NOT NULL,
+    sha256      VARCHAR2(64 BYTE) NOT NULL,
+    byte_size   NUMBER(12) NOT NULL,
+    content     BLOB NOT NULL,
+    CONSTRAINT PK_TA_CONTENT_ASSETS PRIMARY KEY (package_id, path),
+    CONSTRAINT FK_TA_ASSET_PACKAGE FOREIGN KEY (package_id)
+        REFERENCES TB_TA_AGORA_CONTENT_PACKAGES (id) ON DELETE CASCADE,
+    CONSTRAINT CK_TA_ASSET_SIZE CHECK (byte_size BETWEEN 0 AND 4194304)
+)
+/
+COMMENT ON TABLE TB_TA_AGORA_CONTENT_ASSETS IS 'Package files stored as bounded binary large objects.'
+/
+
+CREATE TABLE TB_TA_AGORA_CONTENT_VERSIONS (
+    id          VARCHAR2(36 BYTE) NOT NULL,
+    project_id  VARCHAR2(36 BYTE) NOT NULL,
+    package_id  VARCHAR2(36 BYTE) NOT NULL,
+    created_by  VARCHAR2(36 BYTE) NOT NULL,
+    created_at  TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+    CONSTRAINT PK_TA_CONTENT_VERSIONS PRIMARY KEY (id),
+    CONSTRAINT UQ_TA_VERSION_PROJECT_ID UNIQUE (project_id, id),
+    CONSTRAINT FK_TA_VERSION_PROJECT FOREIGN KEY (project_id)
+        REFERENCES TB_TA_AGORA_PROJECTS (id) ON DELETE CASCADE,
+    CONSTRAINT FK_TA_VERSION_PACKAGE FOREIGN KEY (project_id, package_id)
+        REFERENCES TB_TA_AGORA_CONTENT_PACKAGES (project_id, id),
+    CONSTRAINT FK_TA_VERSION_CREATOR FOREIGN KEY (created_by)
+        REFERENCES TB_TA_AGORA_USERS (id)
+)
+/
+CREATE INDEX IX_TA_VERSION_PROJECT_TIME ON TB_TA_AGORA_CONTENT_VERSIONS (project_id, created_at)
+/
+CREATE INDEX IX_TA_VERSION_PACKAGE ON TB_TA_AGORA_CONTENT_VERSIONS (package_id)
+/
+COMMENT ON TABLE TB_TA_AGORA_CONTENT_VERSIONS IS 'Immutable project version pointing to a same-project HTML package.'
+/
+
+CREATE TABLE TB_TA_AGORA_CONTENT_PUBLICATIONS (
+    id                  VARCHAR2(36 BYTE) NOT NULL,
+    project_id          VARCHAR2(36 BYTE) NOT NULL,
+    version_id          VARCHAR2(36 BYTE) NOT NULL,
+    previous_version_id VARCHAR2(36 BYTE),
+    action              VARCHAR2(10 BYTE) NOT NULL,
+    actor_id            VARCHAR2(36 BYTE) NOT NULL,
+    created_at          TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+    CONSTRAINT PK_TA_CONTENT_PUBLICATIONS PRIMARY KEY (id),
+    CONSTRAINT FK_TA_PUB_PROJECT FOREIGN KEY (project_id)
+        REFERENCES TB_TA_AGORA_PROJECTS (id) ON DELETE CASCADE,
+    CONSTRAINT FK_TA_PUB_VERSION FOREIGN KEY (project_id, version_id)
+        REFERENCES TB_TA_AGORA_CONTENT_VERSIONS (project_id, id)
+        DEFERRABLE INITIALLY DEFERRED,
+    CONSTRAINT FK_TA_PUB_PREVIOUS FOREIGN KEY (project_id, previous_version_id)
+        REFERENCES TB_TA_AGORA_CONTENT_VERSIONS (project_id, id)
+        DEFERRABLE INITIALLY DEFERRED,
+    CONSTRAINT FK_TA_PUB_ACTOR FOREIGN KEY (actor_id)
+        REFERENCES TB_TA_AGORA_USERS (id),
+    CONSTRAINT CK_TA_PUB_ACTION CHECK (action IN ('publish', 'rollback'))
+)
+/
+CREATE INDEX IX_TA_PUB_PROJECT_TIME ON TB_TA_AGORA_CONTENT_PUBLICATIONS (project_id, created_at)
+/
+COMMENT ON TABLE TB_TA_AGORA_CONTENT_PUBLICATIONS IS 'Publication and rollback history for a project.'
+/
+
+CREATE TABLE TB_TA_AGORA_CONTENT_VIEW_GRANTS (
+    token_hash  VARCHAR2(64 BYTE) NOT NULL,
+    project_id  VARCHAR2(36 BYTE) NOT NULL,
+    version_id  VARCHAR2(36 BYTE) NOT NULL,
+    session_hash VARCHAR2(64 BYTE) NOT NULL,
+    created_at  TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+    expires_at  TIMESTAMP WITH TIME ZONE NOT NULL,
+    CONSTRAINT PK_TA_CONTENT_VIEW_GRANTS PRIMARY KEY (token_hash),
+    CONSTRAINT FK_TA_GRANT_VERSION FOREIGN KEY (project_id, version_id)
+        REFERENCES TB_TA_AGORA_CONTENT_VERSIONS (project_id, id) ON DELETE CASCADE,
+    CONSTRAINT FK_TA_GRANT_SESSION FOREIGN KEY (session_hash)
+        REFERENCES TB_TA_AGORA_SESSIONS (token_hash) ON DELETE CASCADE,
+    CONSTRAINT CK_TA_GRANT_LIFETIME CHECK (expires_at > created_at)
+)
+/
+CREATE INDEX IX_TA_GRANT_PROJECT_VERSION ON TB_TA_AGORA_CONTENT_VIEW_GRANTS (project_id, version_id)
+/
+CREATE INDEX IX_TA_GRANT_SESSION ON TB_TA_AGORA_CONTENT_VIEW_GRANTS (session_hash)
+/
+CREATE INDEX IX_TA_GRANT_EXPIRES ON TB_TA_AGORA_CONTENT_VIEW_GRANTS (expires_at)
+/
+COMMENT ON TABLE TB_TA_AGORA_CONTENT_VIEW_GRANTS IS 'Short-lived file-serving grants bound to one project version and live session.'
+/
+
+ALTER TABLE TB_TA_AGORA_PROJECTS ADD CONSTRAINT FK_TA_PROJECT_PUBLISHED
+    FOREIGN KEY (id, published_version_id)
+    REFERENCES TB_TA_AGORA_CONTENT_VERSIONS (project_id, id)
+    DEFERRABLE INITIALLY DEFERRED
+/
+
+CREATE TABLE TB_TA_AGORA_CSV_SNAPSHOTS (
+    id            VARCHAR2(36 BYTE) NOT NULL,
+    project_id    VARCHAR2(36 BYTE) NOT NULL,
+    filename      VARCHAR2(255 BYTE) NOT NULL,
+    content_bytes BLOB NOT NULL,
+    sha256        VARCHAR2(64 BYTE) NOT NULL,
+    byte_size     NUMBER(10) NOT NULL,
+    row_count     NUMBER(10) NOT NULL,
+    columns_json  CLOB NOT NULL,
+    created_by    VARCHAR2(36 BYTE) NOT NULL,
+    created_at    TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+    CONSTRAINT PK_TA_CSV_SNAPSHOTS PRIMARY KEY (id),
+    CONSTRAINT UQ_TA_CSV_PROJECT_ID UNIQUE (project_id, id),
+    CONSTRAINT FK_TA_CSV_PROJECT FOREIGN KEY (project_id)
+        REFERENCES TB_TA_AGORA_PROJECTS (id) ON DELETE CASCADE,
+    CONSTRAINT FK_TA_CSV_CREATOR FOREIGN KEY (created_by)
+        REFERENCES TB_TA_AGORA_USERS (id),
+    CONSTRAINT CK_TA_CSV_SIZE CHECK (byte_size BETWEEN 1 AND 8388608),
+    CONSTRAINT CK_TA_CSV_ROWS CHECK (row_count BETWEEN 0 AND 100000),
+    CONSTRAINT CK_TA_CSV_COLUMNS_JSON CHECK (columns_json IS JSON)
+)
+/
+CREATE INDEX IX_TA_CSV_PROJECT_TIME ON TB_TA_AGORA_CSV_SNAPSHOTS (project_id, created_at)
+/
+COMMENT ON TABLE TB_TA_AGORA_CSV_SNAPSHOTS IS 'Validated, immutable CSV snapshots stored with their original bytes.'
+/
+
+CREATE TABLE TB_TA_AGORA_VERSION_CSV_BINDINGS (
+    version_id  VARCHAR2(36 BYTE) NOT NULL,
+    project_id  VARCHAR2(36 BYTE) NOT NULL,
+    snapshot_id VARCHAR2(36 BYTE) NOT NULL,
+    CONSTRAINT PK_TA_VERSION_CSV_BIND PRIMARY KEY (version_id),
+    CONSTRAINT FK_TA_VCB_VERSION FOREIGN KEY (project_id, version_id)
+        REFERENCES TB_TA_AGORA_CONTENT_VERSIONS (project_id, id) ON DELETE CASCADE,
+    CONSTRAINT FK_TA_VCB_SNAPSHOT FOREIGN KEY (project_id, snapshot_id)
+        REFERENCES TB_TA_AGORA_CSV_SNAPSHOTS (project_id, id) ON DELETE CASCADE
+)
+/
+CREATE INDEX IX_TA_VCB_SNAPSHOT ON TB_TA_AGORA_VERSION_CSV_BINDINGS (snapshot_id)
+/
+COMMENT ON TABLE TB_TA_AGORA_VERSION_CSV_BINDINGS IS 'Optional one-to-one link from a content version to a same-project CSV snapshot.'
+/
+
+CREATE TABLE TB_TA_AGORA_RECORDS (
+    id          VARCHAR2(36 BYTE) NOT NULL,
+    project_id  VARCHAR2(36 BYTE) NOT NULL,
+    data_json   CLOB NOT NULL,
+    revision    NUMBER(19) DEFAULT 1 NOT NULL,
+    created_by  VARCHAR2(36 BYTE) NOT NULL,
+    created_at  TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+    updated_by  VARCHAR2(36 BYTE) NOT NULL,
+    updated_at  TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+    CONSTRAINT PK_TA_RECORDS PRIMARY KEY (id),
+    CONSTRAINT FK_TA_RECORD_PROJECT FOREIGN KEY (project_id)
+        REFERENCES TB_TA_AGORA_PROJECTS (id) ON DELETE CASCADE,
+    CONSTRAINT FK_TA_RECORD_CREATOR FOREIGN KEY (created_by)
+        REFERENCES TB_TA_AGORA_USERS (id),
+    CONSTRAINT FK_TA_RECORD_UPDATER FOREIGN KEY (updated_by)
+        REFERENCES TB_TA_AGORA_USERS (id),
+    CONSTRAINT CK_TA_RECORD_REVISION CHECK (revision >= 1),
+    CONSTRAINT CK_TA_RECORD_JSON CHECK (data_json IS JSON)
+)
+/
+CREATE INDEX IX_TA_RECORD_PROJECT_TIME ON TB_TA_AGORA_RECORDS (project_id, created_at)
+/
+COMMENT ON TABLE TB_TA_AGORA_RECORDS IS 'Project-scoped application records with optimistic revision tracking.'
+/
+
+CREATE TABLE TB_TA_AGORA_DATA_SOURCES (
+    id                    VARCHAR2(36 BYTE) NOT NULL,
+    source_key            VARCHAR2(80 BYTE) NOT NULL,
+    display_name          VARCHAR2(160 BYTE) NOT NULL,
+    environment           VARCHAR2(4 BYTE) NOT NULL,
+    host                  VARCHAR2(255 CHAR) NOT NULL,
+    port                  NUMBER(5) DEFAULT 443 NOT NULL,
+    http_scheme           VARCHAR2(5 BYTE) DEFAULT 'https' NOT NULL,
+    user_env              VARCHAR2(128 BYTE) NOT NULL,
+    password_env          VARCHAR2(128 BYTE) NOT NULL,
+    approved_catalogs_json CLOB NOT NULL,
+    enabled               NUMBER(1) DEFAULT 1 NOT NULL,
+    created_by            VARCHAR2(36 BYTE) NOT NULL,
+    created_at            TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+    updated_at            TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+    CONSTRAINT PK_TA_DATA_SOURCES PRIMARY KEY (id),
+    CONSTRAINT UQ_TA_DATA_SOURCE_KEY UNIQUE (source_key),
+    CONSTRAINT FK_TA_SOURCE_CREATOR FOREIGN KEY (created_by)
+        REFERENCES TB_TA_AGORA_USERS (id),
+    CONSTRAINT CK_TA_SOURCE_ENV CHECK (environment IN ('DEV', 'PROD')),
+    CONSTRAINT CK_TA_SOURCE_HOST_PORT CHECK (port BETWEEN 1 AND 65535),
+    CONSTRAINT CK_TA_SOURCE_HTTPS CHECK (http_scheme = 'https'),
+    CONSTRAINT CK_TA_SOURCE_ENABLED CHECK (enabled IN (0, 1)),
+    CONSTRAINT CK_TA_SOURCE_CATALOGS_JSON CHECK (approved_catalogs_json IS JSON)
+)
+/
+CREATE INDEX IX_TA_SOURCE_ENV_NAME ON TB_TA_AGORA_DATA_SOURCES (environment, display_name)
+/
+COMMENT ON TABLE TB_TA_AGORA_DATA_SOURCES IS 'Approved read-only external sources; credentials are referenced by environment variable name only.'
+/
+
+CREATE TABLE TB_TA_AGORA_PROJECT_SOURCES (
+    project_id  VARCHAR2(36 BYTE) NOT NULL,
+    source_id   VARCHAR2(36 BYTE) NOT NULL,
+    granted_by  VARCHAR2(36 BYTE) NOT NULL,
+    granted_at  TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+    CONSTRAINT PK_TA_PROJECT_SOURCES PRIMARY KEY (project_id, source_id),
+    CONSTRAINT FK_TA_PS_PROJECT FOREIGN KEY (project_id)
+        REFERENCES TB_TA_AGORA_PROJECTS (id) ON DELETE CASCADE,
+    CONSTRAINT FK_TA_PS_SOURCE FOREIGN KEY (source_id)
+        REFERENCES TB_TA_AGORA_DATA_SOURCES (id) ON DELETE CASCADE,
+    CONSTRAINT FK_TA_PS_GRANTOR FOREIGN KEY (granted_by)
+        REFERENCES TB_TA_AGORA_USERS (id)
+)
+/
+CREATE INDEX IX_TA_PS_SOURCE ON TB_TA_AGORA_PROJECT_SOURCES (source_id)
+/
+COMMENT ON TABLE TB_TA_AGORA_PROJECT_SOURCES IS 'Project grants to approved external data sources.'
+/
+CREATE TABLE TB_TA_AGORA_API_DATASETS (
+    id           VARCHAR2(36 BYTE) NOT NULL,
+    project_id   VARCHAR2(36 BYTE) NOT NULL,
+    name         VARCHAR2(128 CHAR) NOT NULL,
+    url          CLOB NOT NULL,
+    method       VARCHAR2(4 BYTE) NOT NULL,
+    headers_json CLOB NOT NULL,
+    body_json    CLOB,
+    records_path VARCHAR2(512 CHAR),
+    created_by   VARCHAR2(36 BYTE) NOT NULL,
+    created_at   TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+    updated_at   TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+    CONSTRAINT PK_TA_API_DATASETS PRIMARY KEY (id),
+    CONSTRAINT UQ_TA_API_DATASET_NAME UNIQUE (project_id, name),
+    CONSTRAINT UQ_TA_API_DATASET_PROJECT_ID UNIQUE (project_id, id),
+    CONSTRAINT FK_TA_API_DATASET_PROJECT FOREIGN KEY (project_id)
+        REFERENCES TB_TA_AGORA_PROJECTS (id) ON DELETE CASCADE,
+    CONSTRAINT FK_TA_API_DATASET_CREATOR FOREIGN KEY (created_by)
+        REFERENCES TB_TA_AGORA_USERS (id),
+    CONSTRAINT CK_TA_API_DATASET_METHOD CHECK (method IN ('GET', 'POST')),
+    CONSTRAINT CK_TA_API_DATASET_HEADERS CHECK (headers_json IS JSON),
+    CONSTRAINT CK_TA_API_DATASET_BODY CHECK (body_json IS JSON)
+)
+/
+COMMENT ON TABLE TB_TA_AGORA_API_DATASETS IS 'Project API configurations with encrypted URL, headers, and payload; imported data uses versioned CSV snapshots.'
+/
+
+CREATE TABLE TB_TA_AGORA_API_DATASET_SCHEDULES (
+    connection_id       VARCHAR2(36 BYTE) NOT NULL,
+    project_id          VARCHAR2(36 BYTE) NOT NULL,
+    enabled             NUMBER(1) DEFAULT 0 NOT NULL,
+    frequency           VARCHAR2(10 BYTE) NOT NULL,
+    interval_minutes    NUMBER(5),
+    local_time          VARCHAR2(5 BYTE),
+    weekdays_json       CLOB,
+    day_of_month        NUMBER(2),
+    timezone            VARCHAR2(64 BYTE) NOT NULL,
+    base_version_id     VARCHAR2(36 BYTE) NOT NULL,
+    publish_mode        VARCHAR2(16 BYTE) NOT NULL,
+    publish_approved_by VARCHAR2(36 BYTE),
+    next_run_at         TIMESTAMP WITH TIME ZONE,
+    last_run_at         TIMESTAMP WITH TIME ZONE,
+    created_by          VARCHAR2(36 BYTE) NOT NULL,
+    created_at          TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+    updated_at          TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+    CONSTRAINT PK_TA_API_DATASET_SCHED PRIMARY KEY (connection_id),
+    CONSTRAINT UQ_TA_API_SCHED_PROJECT_CONN UNIQUE (project_id, connection_id),
+    CONSTRAINT FK_TA_API_SCHED_CONN FOREIGN KEY (project_id, connection_id)
+        REFERENCES TB_TA_AGORA_API_DATASETS (project_id, id) ON DELETE CASCADE,
+    CONSTRAINT FK_TA_API_SCHED_PROJECT FOREIGN KEY (project_id)
+        REFERENCES TB_TA_AGORA_PROJECTS (id) ON DELETE CASCADE,
+    CONSTRAINT FK_TA_API_SCHED_BASE_VERSION FOREIGN KEY (project_id, base_version_id)
+        REFERENCES TB_TA_AGORA_CONTENT_VERSIONS (project_id, id),
+    CONSTRAINT FK_TA_API_SCHED_APPROVER FOREIGN KEY (publish_approved_by)
+        REFERENCES TB_TA_AGORA_USERS (id),
+    CONSTRAINT FK_TA_API_SCHED_CREATOR FOREIGN KEY (created_by)
+        REFERENCES TB_TA_AGORA_USERS (id),
+    CONSTRAINT CK_TA_API_SCHED_ENABLED CHECK (enabled IN (0, 1)),
+    CONSTRAINT CK_TA_API_SCHED_FREQUENCY CHECK (frequency IN ('interval', 'daily', 'weekly', 'monthly')),
+    CONSTRAINT CK_TA_API_SCHED_INTERVAL CHECK (interval_minutes IS NULL OR interval_minutes BETWEEN 15 AND 10080),
+    CONSTRAINT CK_TA_API_SCHED_DAY CHECK ((frequency = 'monthly' AND day_of_month IS NOT NULL AND day_of_month BETWEEN 1 AND 28) OR (frequency <> 'monthly' AND day_of_month IS NULL)),
+    CONSTRAINT CK_TA_API_SCHED_RECURRENCE CHECK ((frequency = 'interval' AND interval_minutes IS NOT NULL AND local_time IS NULL) OR (frequency IN ('daily', 'weekly', 'monthly') AND interval_minutes IS NULL AND local_time IS NOT NULL)),
+    CONSTRAINT CK_TA_API_SCHED_PUBLISH CHECK (publish_mode IN ('draft', 'auto_publish')),
+    CONSTRAINT CK_TA_API_SCHED_WEEKDAYS_JSON CHECK (weekdays_json IS JSON)
+)
+/
+CREATE INDEX IX_TA_API_SCHED_DUE ON TB_TA_AGORA_API_DATASET_SCHEDULES (enabled, next_run_at)
+/
+COMMENT ON TABLE TB_TA_AGORA_API_DATASET_SCHEDULES IS 'Per-connection timezone-aware recurrence and owner-approved publication policy.'
+/
+
+CREATE TABLE TB_TA_AGORA_API_DATASET_RUNS (
+    id                       VARCHAR2(36 BYTE) NOT NULL,
+    connection_id            VARCHAR2(36 BYTE) NOT NULL,
+    project_id               VARCHAR2(36 BYTE) NOT NULL,
+    status                   VARCHAR2(16 BYTE) NOT NULL,
+    is_manual                NUMBER(1) DEFAULT 0 NOT NULL,
+    scheduled_for            TIMESTAMP WITH TIME ZONE NOT NULL,
+    available_at             TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+    attempt_count            NUMBER(2) DEFAULT 0 NOT NULL,
+    claim_token              VARCHAR2(36 BYTE),
+    lease_until              TIMESTAMP WITH TIME ZONE,
+    connection_updated_at    TIMESTAMP WITH TIME ZONE,
+    base_version_id          VARCHAR2(36 BYTE) NOT NULL,
+    source_version_id        VARCHAR2(36 BYTE),
+    expected_published_id    VARCHAR2(36 BYTE),
+    expected_publication_at  TIMESTAMP WITH TIME ZONE,
+    publish_mode             VARCHAR2(16 BYTE) NOT NULL,
+    version_actor_id         VARCHAR2(36 BYTE) NOT NULL,
+    publish_actor_id         VARCHAR2(36 BYTE),
+    requested_by             VARCHAR2(36 BYTE),
+    started_at               TIMESTAMP WITH TIME ZONE,
+    finished_at              TIMESTAMP WITH TIME ZONE,
+    version_id               VARCHAR2(36 BYTE),
+    snapshot_id              VARCHAR2(36 BYTE),
+    published                NUMBER(1),
+    unchanged                NUMBER(1) DEFAULT 0 NOT NULL,
+    error_code               VARCHAR2(80 BYTE),
+    error_message            VARCHAR2(500 CHAR),
+    created_at               TIMESTAMP WITH TIME ZONE DEFAULT SYSTIMESTAMP NOT NULL,
+    CONSTRAINT PK_TA_API_DATASET_RUNS PRIMARY KEY (id),
+    CONSTRAINT FK_TA_API_RUN_SCHEDULE FOREIGN KEY (project_id, connection_id)
+        REFERENCES TB_TA_AGORA_API_DATASET_SCHEDULES (project_id, connection_id) ON DELETE CASCADE,
+    CONSTRAINT FK_TA_API_RUN_PROJECT FOREIGN KEY (project_id)
+        REFERENCES TB_TA_AGORA_PROJECTS (id) ON DELETE CASCADE,
+    CONSTRAINT FK_TA_API_RUN_BASE_VERSION FOREIGN KEY (project_id, base_version_id)
+        REFERENCES TB_TA_AGORA_CONTENT_VERSIONS (project_id, id),
+    CONSTRAINT FK_TA_API_RUN_SOURCE_VERSION FOREIGN KEY (project_id, source_version_id)
+        REFERENCES TB_TA_AGORA_CONTENT_VERSIONS (project_id, id),
+    CONSTRAINT FK_TA_API_RUN_PUBLISHED_EXPECTED FOREIGN KEY (project_id, expected_published_id)
+        REFERENCES TB_TA_AGORA_CONTENT_VERSIONS (project_id, id),
+    CONSTRAINT FK_TA_API_RUN_VERSION FOREIGN KEY (project_id, version_id)
+        REFERENCES TB_TA_AGORA_CONTENT_VERSIONS (project_id, id),
+    CONSTRAINT FK_TA_API_RUN_SNAPSHOT FOREIGN KEY (project_id, snapshot_id)
+        REFERENCES TB_TA_AGORA_CSV_SNAPSHOTS (project_id, id),
+    CONSTRAINT FK_TA_API_RUN_VERSION_ACTOR FOREIGN KEY (version_actor_id)
+        REFERENCES TB_TA_AGORA_USERS (id),
+    CONSTRAINT FK_TA_API_RUN_PUBLISH_ACTOR FOREIGN KEY (publish_actor_id)
+        REFERENCES TB_TA_AGORA_USERS (id),
+    CONSTRAINT FK_TA_API_RUN_REQUESTED_BY FOREIGN KEY (requested_by)
+        REFERENCES TB_TA_AGORA_USERS (id),
+    CONSTRAINT CK_TA_API_RUN_STATUS CHECK (status IN ('queued', 'running', 'succeeded', 'unchanged', 'failed', 'cancelled', 'needs_review')),
+    CONSTRAINT CK_TA_API_RUN_MANUAL CHECK (is_manual IN (0, 1)),
+    CONSTRAINT CK_TA_API_RUN_ATTEMPTS CHECK (attempt_count BETWEEN 0 AND 99),
+    CONSTRAINT CK_TA_API_RUN_PUBLISH_MODE CHECK (publish_mode IN ('draft', 'auto_publish')),
+    CONSTRAINT CK_TA_API_RUN_PUBLISHED CHECK (published IS NULL OR published IN (0, 1)),
+    CONSTRAINT CK_TA_API_RUN_UNCHANGED CHECK (unchanged IN (0, 1))
+)
+/
+CREATE INDEX IX_TA_API_RUN_QUEUE ON TB_TA_AGORA_API_DATASET_RUNS (status, available_at, scheduled_for)
+/
+CREATE INDEX IX_TA_API_RUN_CONN_TIME ON TB_TA_AGORA_API_DATASET_RUNS (connection_id, created_at)
+/
+COMMENT ON TABLE TB_TA_AGORA_API_DATASET_RUNS IS 'Sanitized scheduled and manual API refresh history with fenced worker leases.'
+/
+
