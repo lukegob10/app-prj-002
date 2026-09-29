@@ -1,10 +1,10 @@
-# Agora
+# Project Sharing Platform
 
-Agora hosts and shares HTML dashboards and small browser apps produced outside the platform. An Angular shell manages accounts, projects, access, uploads and publication. FastAPI enforces authorization, persists metadata and files in Oracle, and exposes narrow data capabilities to isolated HTML viewers.
+This application hosts and shares HTML dashboards and small browser apps produced outside the platform. An Angular shell manages accounts, projects, access, uploads and publication. FastAPI enforces authorization, persists metadata and files in Oracle, and exposes narrow data capabilities to isolated HTML viewers.
 
 ## Local setup
 
-Requirements: Python 3.12, Node 22, npm, Oracle access configured for Agora, and PowerShell. Copy `.env.example` to `.env` and set `TA_PROD_PASSWORD` privately. Install the Agora backend and its Oracle and Trino drivers into `.venv`. The PROD connection is configured with `TA_PROD_USER`, `TA_PROD_PASSWORD`, and `TA_PROD_DSN`; Agora tables are created in that Oracle user's default schema. The schema names require Oracle 12.2+ with `COMPATIBLE >= 12.2`; use AL32UTF8 for full Unicode support. `ENV=PROD` selects the production code path. The local app origin is `http://localhost:4200`.
+Requirements: Python 3.12, Node 22, npm, Oracle access configured for the application, and PowerShell. Copy `.env.example` to `.env` and set `TA_PROD_PASSWORD` privately. Install the backend and its Oracle and Trino drivers into `.venv`. The PROD connection is configured with `TA_PROD_USER`, `TA_PROD_PASSWORD`, and `TA_PROD_DSN`; application tables are created in that Oracle user's default schema. The schema names require Oracle 12.2+ with `COMPATIBLE >= 12.2`; use AL32UTF8 for full Unicode support. `ENV=PROD` selects the production code path. The local app origin is `http://localhost:4200`.
 
 ```powershell
 py -3.12 -m venv .venv
@@ -21,7 +21,7 @@ Open `http://localhost:4200`. Angular proxies `/api` to FastAPI on `127.0.0.1:80
 
 Set `AGORA_PUBLIC_ORIGIN=http://localhost:4200` for this frontend. The scheme, hostname, and port must match the browser address; `127.0.0.1` and `localhost` are different origins. Local HTTP pages opened through a loopback IP redirect to `localhost` before sign-in. If running a second instance on another port, set that backend's `AGORA_PUBLIC_ORIGIN` to the matching localhost URL and restart that backend after changing it. An `origin_mismatch` error happens before password validation.
 
-`backend/schema.sql` is the single baseline DDL for the connected Oracle user's default schema. It creates all `TB_TA_AGORA_` tables, named constraints, and workload indexes in dependency order. It requires Oracle 12.2 or later with `COMPATIBLE` set to at least 12.2 because the requested table names exceed Oracle's older 30-byte identifier limit. Run it once against an empty schema with `python -m agora.core.schema` or execute it as a script in Oracle SQL Developer. It does not drop or rename existing objects. The schema command reports an already-complete schema and refuses a partial schema or unrecognized/legacy Agora tables instead of guessing how to repair them.
+`backend/schema.sql` is the single baseline DDL for the connected Oracle user's default schema. It creates all `TB_TA_AGORA_` tables, named constraints, and workload indexes in dependency order. It requires Oracle 12.2 or later with `COMPATIBLE` set to at least 12.2 because the requested table names exceed Oracle's older 30-byte identifier limit. Run it once against an empty schema with `python -m agora.core.schema` or execute it as a script in Oracle SQL Developer. It does not drop or rename existing objects. The schema command reports an already-complete schema and refuses a partial schema or unrecognized legacy tables instead of guessing how to repair them.
 
 ## API dataset setup
 
@@ -39,7 +39,7 @@ The worker stores claims and run history in Oracle so multiple replicas can shar
 
 API connections require a private `API_DATA_ENCRYPTION_KEY` in `.env`. Generate a Fernet key using the command in `.env.example`, keep it out of source control, and back it up alongside the database. Saved URLs, headers, and payloads are encrypted with this key. Losing or replacing the key makes existing connections unreadable. Endpoints must resolve to public IP addresses; local/private hosts and redirects are rejected.
 
-For an existing Agora database, install the updated backend dependencies and apply the additive migrations, then restart the backend and scheduler:
+For an existing database, install the updated backend dependencies and apply the additive migrations, then restart the backend and scheduler:
 
 ```powershell
 .venv/Scripts/python.exe -m pip install -e ./backend
@@ -64,7 +64,7 @@ Self-registration takes a unique username, full name and password. A platform ad
 .venv/Scripts/python.exe -m agora.core.admin_cli bootstrap-admin --username admin --full-name "Platform Administrator"
 ```
 
-The CLI prompts for the password without echo. It only runs while no admin account exists. For account recovery, an operator verifies the person's identity outside Agora and runs:
+The CLI prompts for the password without echo. It only runs while no admin account exists. For account recovery, an operator verifies the person's identity outside the application and runs:
 
 ```powershell
 .venv/Scripts/python.exe -m agora.core.admin_cli reset-password --username existing_user
