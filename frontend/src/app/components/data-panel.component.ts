@@ -1,6 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { Component, EventEmitter, Input, OnChanges, OnDestroy, Output, SimpleChanges } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { projectPath } from '../project-paths';
 import { catchError, forkJoin, map, of } from 'rxjs';
 import { ApiDatasetConnection, ApiDatasetRun, ApiDatasetSchedule, ApiService, ApprovedSource, CsvSnapshot, CsvSnapshotPreview, Project, ProjectVersion, SavedRecord, errorMessage, schedulerErrorMessage } from '../services/api.service';
 
@@ -19,10 +20,10 @@ interface ApiRefreshStatus {
       <p *ngIf="loading" class="hint" role="status">Loading data…</p><p *ngIf="error" class="error" role="alert">{{error}}</p><p *ngIf="localError" class="error" role="alert">{{localError}}</p><p *ngIf="notice" class="success" role="status">{{notice}}</p>
       <div class="data-status-grid">
         <section class="status-card live-data-card" aria-labelledby="live-data-title">
-          <div class="status-card-heading"><h3 id="live-data-title">Live dashboard data</h3><span class="status-chip" [class.has-data]="!!liveSnapshot">{{loading ? 'Loading data' : (liveVersion ? (liveSnapshot ? 'CSV connected' : 'No CSV snapshot') : 'Not published')}}</span></div>
+          <div class="status-card-heading"><h3 id="live-data-title">Live dashboard data</h3><span class="status-chip" [class.has-data]="!!liveSnapshot">{{loading ? 'Loading data' : (liveVersion ? (liveSnapshot ? 'CSV connected' : 'No CSV attached') : 'Not published')}}</span></div>
           <ng-container *ngIf="liveVersion as live; else noLiveVersion">
             <div *ngIf="liveSnapshot as snapshot" class="live-snapshot"><strong>{{snapshot.filename || 'CSV snapshot'}}</strong><span>{{snapshot.row_count ?? 0}} rows · {{snapshot.columns.length}} columns</span></div>
-            <p *ngIf="!loading && !liveSnapshot" class="data-warning">This live version has no CSV snapshot; dashboards using Agora.csv() will not show CSV data.</p>
+            <p *ngIf="!loading && !liveSnapshot" class="hint">This dashboard can run without a CSV. Add one only if it needs CSV data.</p>
             <small>Version {{live.id.slice(0,8)}} · published dashboard</small>
           </ng-container>
           <ng-template #noLiveVersion><p class="hint">No published dashboard version yet.</p></ng-template>
@@ -53,8 +54,8 @@ interface ApiRefreshStatus {
 
         <section *ngIf="pendingPublishVersion as ready" class="status-card ready-version-card" aria-labelledby="ready-version-title">
           <div><h3 id="ready-version-title">Imported data is ready to review</h3><p>Version {{ready.id.slice(0,8)}} has a CSV snapshot and is not live yet.</p></div>
-          <a *ngIf="isOwner" class="button primary small" [routerLink]="['/projects',project.id]" [queryParams]="{version:ready.id}">Preview and publish</a>
-          <a *ngIf="!isOwner" class="button secondary small" [routerLink]="['/projects',project.id]" [queryParams]="{version:ready.id}">Preview version</a>
+          <a *ngIf="isOwner" class="button primary small" [routerLink]="projectPath(project.owner_username,project.id)" [queryParams]="{version:ready.id}">Preview and publish</a>
+          <a *ngIf="!isOwner" class="button secondary small" [routerLink]="projectPath(project.owner_username,project.id)" [queryParams]="{version:ready.id}">Preview version</a>
         </section>
       </div>
 
@@ -119,6 +120,7 @@ interface ApiRefreshStatus {
   `]
 })
 export class DataPanelComponent implements OnChanges, OnDestroy {
+  readonly projectPath = projectPath;
   @Input({required:true}) project!:Project; @Input() versions:ProjectVersion[]=[]; @Input() snapshots:CsvSnapshot[]=[]; @Input() records:SavedRecord[]=[]; @Input() loading=false; @Input() error='';
   @Output() refresh=new EventEmitter<void>(); @Output() createRecord=new EventEmitter<{data:Record<string,unknown>}>(); @Output() updateRecord=new EventEmitter<{id:string;data:Record<string,unknown>;revision:number}>();
   sources:ApprovedSource[]=[]; availableSources:ApprovedSource[]=[]; sourceLoading=false; sourceError=''; localError=''; notice=''; sourceToGrant=''; recordDraft=''; editing:SavedRecord|null=null; catalogDraft='';

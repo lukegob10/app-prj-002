@@ -19,6 +19,7 @@ _PROJECT_FIELDS = """
     p.name AS name,
     p.description AS description,
     p.owner_id AS owner_id,
+    owner.username AS owner_username,
     p.created_at AS created_at,
     p.updated_at AS updated_at,
     p.allow_viewer_writes AS allow_viewer_writes,
@@ -39,6 +40,7 @@ def _project_shape(row: dict[str, Any], role: str | None = None) -> dict[str, An
         "name": row["name"],
         "description": row.get("description"),
         "owner_id": row["owner_id"],
+        "owner_username": row["owner_username"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
         "role": role if role is not None else row.get("role"),
@@ -52,7 +54,10 @@ def get_project(conn: Any, project_id: str) -> dict[str, Any]:
     """Return a project row or raise 404. The returned mapping includes API fields."""
     row = query_one(
         conn,
-        f"SELECT {_PROJECT_FIELDS} FROM TB_TA_AGORA_PROJECTS p WHERE p.id = :project_id",
+        f"""SELECT {_PROJECT_FIELDS}
+            FROM TB_TA_AGORA_PROJECTS p
+            JOIN TB_TA_AGORA_USERS owner ON owner.id = p.owner_id
+            WHERE p.id = :project_id""",
         {"project_id": project_id},
     )
     if row is None:
@@ -166,7 +171,8 @@ def _validate_project_payload(payload: Any, *, patch: bool) -> dict[str, Any]:
                 "validation_error",
                 "Project description must be at most 1000 characters.",
             )
-        clean["description"] = description.strip() if isinstance(description, str) else None
+        cleaned_description = description.strip() if isinstance(description, str) else None
+        clean["description"] = cleaned_description or None
     if "allow_viewer_writes" in payload:
         enabled = payload["allow_viewer_writes"]
         if not isinstance(enabled, bool):
@@ -194,6 +200,7 @@ def list_projects(actor: Actor = Depends(require_actor)) -> dict[str, list[dict[
                            ELSE m.role
                        END AS role
                 FROM TB_TA_AGORA_PROJECTS p
+                JOIN TB_TA_AGORA_USERS owner ON owner.id = p.owner_id
                 LEFT JOIN TB_TA_AGORA_MEMBERSHIPS m
                     ON m.project_id = p.id AND m.account_id = :actor_id
                 WHERE p.owner_id = :actor_id

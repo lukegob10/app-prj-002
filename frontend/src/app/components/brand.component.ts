@@ -1,13 +1,15 @@
 import { Component, Input, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { ThemeService } from '../services/theme.service';
+import { ApiService } from '../services/api.service';
+import { spacePath } from '../project-paths';
 
 @Component({
   selector: 'agora-brand',
   standalone: true,
   imports: [RouterLink],
   template: `
-    <a class="brand" [class.compact-mobile]="compactOnMobile" [routerLink]="destination" [attr.aria-label]="label">
+    <a class="brand" [class.compact-mobile]="compactOnMobile" [routerLink]="destination || spacePath(api.currentUser()?.username || '')" [attr.aria-label]="label">
       <span class="logo-full" [class.dark]="theme.theme() === 'dark'" aria-hidden="true">
         <img class="logo-wordmark" src="/brand/agora-wordmark-color.png" width="512" height="144" alt="" />
         @if (theme.theme() === 'dark') {
@@ -33,8 +35,10 @@ import { ThemeService } from '../services/theme.service';
   `]
 })
 export class BrandComponent {
-  @Input() destination = '/space';
+  @Input() destination: string | null = null;
   @Input() label = 'Agora, My Space';
   @Input() compactOnMobile = false;
   readonly theme = inject(ThemeService);
+  readonly api = inject(ApiService);
+  readonly spacePath = spacePath;
 }

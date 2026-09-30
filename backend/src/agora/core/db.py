@@ -2,49 +2,64 @@
 
 from contextlib import contextmanager
 import os
+from threading import Lock
 from typing import Any, Iterator, Mapping
 
+from sqlalchemy import create_pool_from_url
+from sqlalchemy.pool import Pool
+from treasury_analytics import TAConnection
+
 from agora.core.config import environment
-
-
-_DEV_ORACLE_USER = "LG2254"
-_DEV_ORACLE_DSN = "192.168.1.151:1521/FREEPDB1"
 
 
 class StorageUnavailable(RuntimeError):
     """Agora could not establish an Oracle connection."""
 
 
-def _connect_oracle() -> Any:
-    selected = environment()
-    use_ta_client = os.getenv("AGORA_USE_TREASURY_ANALYTICS", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-    if use_ta_client:
-        try:
-            from treasury_analytics import TAConnection
-        except ImportError as exc:
-            raise RuntimeError("AGORA_USE_TREASURY_ANALYTICS is enabled but the package is not installed") from exc
-        return TAConnection(env=selected).connect()
+_pools: dict[str, Pool] = {}
+_pool_lock = Lock()
 
-    user = os.getenv(f"TA_{selected}_USER")
-    password = os.getenv(f"TA_{selected}_PASSWORD")
-    dsn = os.getenv(f"TA_{selected}_DSN")
-    if selected == "DEV":
-        user = user or _DEV_ORACLE_USER
-        dsn = dsn or _DEV_ORACLE_DSN
-    if not all((user, password, dsn)):
-        raise RuntimeError(
-            "Set TA_<ENV>_PASSWORD; PROD also requires TA_PROD_USER and TA_PROD_DSN"
-        )
+
+def _integer_setting(name: str, default: int, minimum: int) -> int:
+    raw = os.getenv(name, str(default))
     try:
-        import oracledb
-    except ImportError as exc:
-        raise RuntimeError("The python-oracledb driver is not installed") from exc
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if value < minimum:
+        raise ValueError(f"{name} must be at least {minimum}")
+    return value
 
-    return oracledb.connect(user=user, password=password, dsn=dsn)
+
+def _boolean_setting(name: str, default: bool) -> bool:
+    raw = os.getenv(name, "1" if default else "0").strip().lower()
+    if raw in {"1", "true", "yes"}:
+        return True
+    if raw in {"0", "false", "no"}:
+        return False
+    raise ValueError(f"{name} must be 1 or 0")
+
+
+def _pool(selected: str) -> Pool:
+    with _pool_lock:
+        pool = _pools.get(selected)
+        if pool is None:
+            pool = create_pool_from_url(
+                "oracle+oracledb://",
+                creator=TAConnection(env=selected).connect,
+                pool_size=_integer_setting("AGORA_DB_POOL_SIZE", 5, 1),
+                max_overflow=_integer_setting("AGORA_DB_POOL_MAX_OVERFLOW", 5, 0),
+                pool_timeout=_integer_setting("AGORA_DB_POOL_TIMEOUT", 30, 1),
+                pool_recycle=_integer_setting("AGORA_DB_POOL_RECYCLE", 1800, 1),
+                pool_pre_ping=_boolean_setting("AGORA_DB_POOL_PRE_PING", True),
+                pool_use_lifo=_boolean_setting("AGORA_DB_POOL_USE_LIFO", True),
+            )
+            _pools[selected] = pool
+        return pool
+
+
+def _connect_oracle() -> Any:
+    return _pool(environment()).connect()
 
 
 @contextmanager

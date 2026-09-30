@@ -3,6 +3,7 @@ import { Component, ElementRef, HostListener, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { ApiService } from '../services/api.service';
+import { projectPath, spacePath } from '../project-paths';
 import { AdminSupportComponent } from '../components/admin-support.component';
 import { BrandComponent } from '../components/brand.component';
 import { ThemeToggleComponent } from '../components/theme-toggle.component';
@@ -17,9 +18,10 @@ interface SpaceUser {
 interface SpaceProject {
   id: string;
   name: string;
-  description: string;
+  description: string | null;
   role: string;
   owner_id: string;
+  owner_username: string;
   created_at: string;
   updated_at: string;
   allow_viewer_writes: boolean;
@@ -167,7 +169,7 @@ interface SpaceProject {
                 </thead>
                 <tbody>
                   <tr *ngFor="let project of ownedProjects">
-                    <th scope="row"><a class="project-link" [routerLink]="['/projects', project.id]">{{ project.name }}</a></th>
+                    <th scope="row"><a class="project-link" [routerLink]="projectPath(project.owner_username, project.id)">{{ project.name }}</a></th>
                     <td class="description-cell">{{ project.description || 'No description added.' }}</td>
                     <td><span class="status-badge" [class.published]="project.published_version_id">{{ project.published_version_id ? 'Published' : 'Draft' }}</span></td>
                     <td class="date-cell">{{ project.updated_at ? (project.updated_at | date: 'mediumDate') : '—' }}</td>
@@ -193,7 +195,7 @@ interface SpaceProject {
                 </thead>
                 <tbody>
                   <tr *ngFor="let project of sharedProjects">
-                    <th scope="row"><a class="project-link" [routerLink]="['/projects', project.id]">{{ project.name }}</a></th>
+                    <th scope="row"><a class="project-link" [routerLink]="projectPath(project.owner_username, project.id)">{{ project.name }}</a></th>
                     <td class="description-cell">{{ project.description || 'No description added.' }}</td>
                     <td><span class="status-badge" [class.published]="project.published_version_id">{{ project.published_version_id ? 'Published' : 'Draft' }}</span></td>
                     <td class="role-cell">{{ project.role | titlecase }}</td>
@@ -312,6 +314,7 @@ interface SpaceProject {
   `],
 })
 export class SpacePage implements OnInit {
+  readonly projectPath = projectPath;
   user: SpaceUser | null = null;
   ownedProjects: SpaceProject[] = [];
   sharedProjects: SpaceProject[] = [];
@@ -369,6 +372,9 @@ export class SpacePage implements OnInit {
           return;
         }
         this.user = auth.user;
+        if (this.router.url.split(/[?#]/, 1)[0] !== spacePath(auth.user.username)) {
+          void this.router.navigateByUrl(spacePath(auth.user.username), { replaceUrl: true });
+        }
         this.loadProjects();
       },
       error: () => {
@@ -409,7 +415,7 @@ export class SpacePage implements OnInit {
         this.projectName = '';
         this.projectDescription = '';
         this.showCreateForm = false;
-        void this.router.navigate(['/projects', project.id]);
+        void this.router.navigateByUrl(projectPath(project.owner_username, project.id));
       },
       error: (error: unknown) => {
         this.creating = false;

@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { Component, EventEmitter, Input, OnChanges, OnDestroy, Output, SimpleChanges } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { ApiDatasetConfig, ApiDatasetConnection, ApiDatasetPreview, ApiDatasetRun, ApiDatasetSchedule, ApiDatasetScheduleConfig, ApiDatasetScheduleFrequency, ApiDatasetPublishMode, ApiService, Member, Project, ProjectVersion, errorMessage, schedulerErrorMessage } from '../services/api.service';
+import { projectPath } from '../project-paths';
 
 @Component({
   selector: 'app-project-controls',
@@ -84,7 +85,7 @@ import { ApiDatasetConfig, ApiDatasetConnection, ApiDatasetPreview, ApiDatasetRu
                     }
                   </div>
                   <div class="version-actions">
-                    <a class="text-link" [routerLink]="['/projects', project.id]" [queryParams]="{version: version.id}">Preview</a>
+                    <a class="text-link" [routerLink]="projectPath(project.owner_username, project.id)" [queryParams]="{version: version.id}">Preview</a>
                     @if (isOwnerOrAdmin && !isLive(version)) {
                       <button class="button small" type="button" (click)="publish.emit(version.id)" [disabled]="loading">
                         Publish
@@ -452,6 +453,7 @@ import { ApiDatasetConfig, ApiDatasetConnection, ApiDatasetPreview, ApiDatasetRu
   `],
 })
 export class ProjectControlsComponent implements OnChanges, OnDestroy {
+  readonly projectPath = projectPath;
   @Input({ required: true }) project!: Project;
   @Input({ required: true }) versions: ProjectVersion[] = [];
   @Input() section: 'versions' | 'access' | 'data' = 'versions';

@@ -29,4 +29,4 @@ The frame runs with scripts enabled but without `allow-same-origin`. The host an
 
 ## Local development
 
-Use the commands in the root README to install the backend, create a new schema, and start FastAPI and Angular. The Angular dev server runs on `localhost:4200` and proxies API requests to FastAPI on `127.0.0.1:8000`. Start the scheduler worker in another terminal when using schedules. The Docker Compose deployment is in `deploy/`.
+Use the commands in the root README to install the backend, create a new schema, and start FastAPI and Angular. The Angular dev server runs on `localhost:4200` and proxies API requests to FastAPI on `127.0.0.1:8000`. Start the scheduler worker in another terminal when using schedules.

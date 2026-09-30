@@ -4,7 +4,7 @@ This application hosts and shares HTML dashboards and small browser apps produce
 
 ## Local setup
 
-Requirements: Python 3.12, Node 22, npm, Oracle access configured for the application, and PowerShell. Copy `.env.example` to `.env` and set `TA_PROD_PASSWORD` privately. Install the backend and its Oracle and Trino drivers into `.venv`. The PROD connection is configured with `TA_PROD_USER`, `TA_PROD_PASSWORD`, and `TA_PROD_DSN`; application tables are created in that Oracle user's default schema. The schema names require Oracle 12.2+ with `COMPATIBLE >= 12.2`; use AL32UTF8 for full Unicode support. `ENV=PROD` selects the production code path. The local app origin is `http://localhost:4200`.
+Requirements: Python 3.12, Node 22, npm, Oracle access configured for the application, and PowerShell. Copy `.env.example` to `.env` and set `TA_PROD_PASSWORD` privately. Install the backend and its Oracle and Trino drivers into `.venv`. The Treasury Analytics module in `.venv/Lib/site-packages/treasury_analytics` supplies the DEV and PROD users and DSNs; `.env` supplies the selected environment's password. Reinstall and configure that local module if you recreate `.venv`, since virtual environments are excluded from source control. Application tables are created in that Oracle user's default schema. The schema names require Oracle 12.2+ with `COMPATIBLE >= 12.2`; use AL32UTF8 for full Unicode support. `ENV=PROD` selects the production code path. The local app origin is `http://localhost:4200`.
 
 ```powershell
 py -3.12 -m venv .venv
@@ -17,7 +17,11 @@ npm start
 
 Run `.venv/Scripts/python.exe -m uvicorn agora.main:app --host 127.0.0.1 --port 8000` from the repository root in another terminal. Run the scheduler worker shown below in a third terminal when using scheduled API imports.
 
+Agora pools Oracle connections through SQLAlchemy, using `TAConnection` to create each physical connection. The six `AGORA_DB_POOL_*` settings in `.env` control each process's pool. With the supplied defaults, each backend or scheduler process keeps up to five idle connections and can open five more during a burst, waits up to 30 seconds for a free connection, and replaces connections older than 30 minutes. Checkout pings idle connections, and returning one rolls back any unfinished transaction. Restart the process after changing pool settings.
+
 Open `http://localhost:4200`. Angular proxies `/api` to FastAPI on `127.0.0.1:8000`. `GET /api/health/live` reports process liveness; `GET /api/health/ready` checks Oracle and the baseline tables, named constraints, and declared indexes. Readiness returns 503 if credentials, Oracle, or the schema are unavailable. It never silently substitutes local storage or mock data.
+
+After sign-in, each person's space is at `/<username>`. A published dashboard is at `/<owner-username>/projects/<project-id>`; the project page's **Copy dashboard link** action copies this address without preview or management options. Recipients must sign in and have access to the project. Existing ID-based, `/space`, and `/projects/<project-id>` bookmarks redirect to these addresses. The reserved usernames `login` and `space` use `/@login` and `/@space` to avoid conflicting with app routes.
 
 Set `AGORA_PUBLIC_ORIGIN=http://localhost:4200` for this frontend. The scheme, hostname, and port must match the browser address; `127.0.0.1` and `localhost` are different origins. Local HTTP pages opened through a loopback IP redirect to `localhost` before sign-in. If running a second instance on another port, set that backend's `AGORA_PUBLIC_ORIGIN` to the matching localhost URL and restart that backend after changing it. An `origin_mismatch` error happens before password validation.
 
@@ -45,14 +49,15 @@ For an existing database, install the updated backend dependencies and apply the
 .venv/Scripts/python.exe -m pip install -e ./backend
 .venv/Scripts/python.exe -m agora.core.migrate_api_datasets
 .venv/Scripts/python.exe -m agora.core.migrate_api_dataset_schedules
+.venv/Scripts/python.exe -m agora.core.migrate_optional_project_description
 .venv/Scripts/python.exe -m uvicorn agora.main:app --host 127.0.0.1 --port 8000
 ```
 
-Run both migrations before starting the updated API and worker. New databases receive the tables through `backend/schema.sql`. The migrations leave existing projects, versions, and snapshots intact and can be rerun safely. Back up `API_DATA_ENCRYPTION_KEY`: the worker needs the same key as the API process to read saved connections.
+Run the migrations before starting the updated API and worker. The third migration makes project descriptions optional in older databases; new databases already allow this through `backend/schema.sql`. The migrations leave existing projects, versions, and snapshots intact and can be rerun safely. Back up `API_DATA_ENCRYPTION_KEY`: the worker needs the same key as the API process to read saved connections.
 
 ## CSV snapshots and dashboard edits
 
-CSV uploads are immutable and bound to dashboard versions. The Data tab lets editors browse snapshots and page through their rows. Replacing a CSV creates a working version that must be previewed and published; it does not edit the published snapshot in place.
+An HTML file or ZIP package can be uploaded and published without a CSV. CSV uploads are optional, immutable, and bound to dashboard versions. The Data tab lets editors browse snapshots and page through their rows. Replacing a CSV creates a working version that must be previewed and published; it does not edit the published snapshot in place.
 
 Uploaded HTML reads the bound CSV through `Agora.csv()`. To save edits from a dashboard, use `Agora.records.create()`, `update()`, or `delete()` and merge those saved records with the CSV when rendering. Owners and editors can write records; viewers can write only when the project owner enables viewer writes. Saved records appear separately in the Data tab and do not modify CSV downloads or previews.
 
@@ -76,4 +81,4 @@ This revokes existing sessions and writes an audit event. A signed-in platform a
 
 The backend stores projects, versions, CSV snapshots, and records in shared Oracle tables. Owners manage members and publication; editors upload and preview; viewers see published projects. Uploaded content runs in an isolated iframe. See [architecture](docs/ARCHITECTURE.md) for the Oracle and Starburst paths and what the viewer SDK does.
 
-The product direction is in [Platform vision](docs/PLATFORM_VISION.md). See [deployment](deploy/README.md) for the Docker Compose setup.
+The product direction is in [Platform vision](docs/PLATFORM_VISION.md).

@@ -7,7 +7,7 @@ export interface AdminAccount extends User { created_at: string }
 export interface AuthResponse { user: User; csrf_token: string }
 export type Role = 'owner' | 'editor' | 'viewer' | 'admin';
 export interface Project {
-  id: string; name: string; description: string; owner_id: string; created_at: string;
+  id: string; name: string; description: string | null; owner_id: string; owner_username: string; created_at: string;
   updated_at: string; role: Role; allow_viewer_writes: boolean; published_version_id: string | null;
 }
 export interface Member { account_id: string; username: string; full_name: string; role: Role }
@@ -125,7 +125,7 @@ export class ApiService {
   resetAccountPassword(username:string,newPassword:string): Observable<{ok:boolean}> { return this.http.post<{ok:boolean}>(`/api/admin/accounts/${encodeURIComponent(username)}/reset-password`,{new_password:newPassword},{headers:this.headers()}); }
   listProjects(): Observable<{ owned: Project[]; shared: Project[] }> { return this.http.get<{ owned: Project[]; shared: Project[] }>('/api/projects'); }
   createProject(name: string, description: string): Observable<Project> {
-    return this.http.post<Project>('/api/projects', { name, description }, { headers: this.headers() });
+    return this.http.post<Project>('/api/projects', description ? { name, description } : { name }, { headers: this.headers() });
   }
   getProject(projectId: string): Observable<Project> { return this.http.get<Project>(`/api/projects/${encodeURIComponent(projectId)}`); }
   updateProject(projectId: string, changes: { name?: string; description?: string; allow_viewer_writes?: boolean }): Observable<Project> {

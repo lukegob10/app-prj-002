@@ -3,6 +3,7 @@ import { Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { ApiService } from '../services/api.service';
+import { spacePath } from '../project-paths';
 import { BrandComponent } from '../components/brand.component';
 import { ThemeToggleComponent } from '../components/theme-toggle.component';
 
@@ -238,7 +239,7 @@ export class AuthPage implements OnInit {
     this.api.auth().subscribe({
       next: (auth) => {
         this.checkingSession = false;
-        if (auth) void this.router.navigateByUrl('/space');
+        if (auth) void this.router.navigateByUrl(this.destination(auth.user.username));
       },
       error: () => {
         this.checkingSession = false;
@@ -268,9 +269,9 @@ export class AuthPage implements OnInit {
       : this.api.login(username, this.password);
 
     request.subscribe({
-      next: () => {
+      next: (auth) => {
         this.busy = false;
-        void this.router.navigateByUrl('/space');
+        void this.router.navigateByUrl(this.destination(auth.user.username));
       },
       error: (error: unknown) => {
         this.busy = false;
@@ -278,6 +279,13 @@ export class AuthPage implements OnInit {
           (this.isRegistering ? 'We could not create your account. Check your details and try again.' : 'We could not sign you in. Check your details and try again.');
       },
     });
+  }
+
+  private destination(username: string): string {
+    const returnUrl = this.router.parseUrl(this.router.url).queryParams['returnUrl'];
+    return returnUrl && returnUrl.startsWith('/') && !returnUrl.startsWith('//') && !returnUrl.startsWith('/\\') && !/[\r\n]/.test(returnUrl) && !returnUrl.startsWith('/login')
+      ? returnUrl
+      : spacePath(username);
   }
 
   private readErrorMessage(error: unknown): string | null {
